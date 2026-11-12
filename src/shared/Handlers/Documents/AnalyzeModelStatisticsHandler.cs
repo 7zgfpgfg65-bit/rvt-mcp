@@ -1,8 +1,9 @@
-using System.Collections.Generic;
+// Modified by 7zgfpgfg65-bit, 2026-11-12: additive category-ID counts and scope evidence.
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Newtonsoft.Json.Linq;
+using RvtMcp.Plugin.Documents;
 
 namespace RvtMcp.Plugin.Handlers
 {
@@ -32,26 +33,13 @@ namespace RvtMcp.Plugin.Handlers
             var collector = new FilteredElementCollector(doc)
                 .WhereElementIsNotElementType();
 
-            var stats = new Dictionary<string, int>();
-            int processed = 0;
-            bool truncated = false;
-
-            foreach (var el in collector)
+            var stats = CategoryStatistics.Collect(collector.Select(el =>
             {
-                if (processed >= maxElements)
-                {
-                    truncated = true;
-                    break;
-                }
-                processed++;
-                var catName = el.Category?.Name ?? "Uncategorized";
-                if (stats.ContainsKey(catName))
-                    stats[catName]++;
-                else
-                    stats[catName] = 1;
-            }
+                var category = el.Category;
+                return new CategoryObservation(category == null ? (long?)null : RevitCompat.GetId(category.Id), category?.Name);
+            }), maxElements);
 
-            var categories = stats
+            var categories = stats.LegacyCounts
                 .OrderByDescending(kv => kv.Value)
                 .Select(kv => new { category = kv.Key, count = kv.Value })
                 .ToArray();
@@ -59,14 +47,30 @@ namespace RvtMcp.Plugin.Handlers
             return CommandResult.Ok(new
             {
                 projectName = doc.Title,
-                elementsCounted = processed,
+                elementsCounted = stats.Processed,
                 totalCategories = categories.Length,
-                truncated,
+                truncated = stats.Truncated,
                 cap = maxElements,
-                note = truncated
-                    ? $"Model exceeds {maxElements} elements; stats reflect the first {processed} enumerated. Raise maxElements for full accuracy."
+                note = stats.Truncated
+                    ? $"Model exceeds {maxElements} elements; stats reflect the first {stats.Processed} enumerated. Raise maxElements for full accuracy."
                     : null,
-                categories
+                categories,
+                // Legacy categories remain name-grouped for compatibility. New clients must use this block.
+                categoryIdCountsSchemaVersion = 1,
+                categoryIdCounts = stats.Categories,
+                categorizedElementsCounted = stats.Processed - stats.Uncategorized,
+                uncategorizedElementsCounted = stats.Uncategorized,
+                categoryIdCountsComplete = !stats.Truncated,
+                categoryIdCountsScope = new
+                {
+                    hostDocumentOnly = true, instancesOnly = true, categorizedElementsOnly = true,
+                    includesModelAndAnnotationCategories = true, linkedDocumentContentsIncluded = false
+                },
+                document = new
+                {
+                    documentId = DocumentTargetGuard.GetOrCreateToken(doc),
+                    path = doc.PathName, title = doc.Title, revitVersion = app.Application.VersionNumber
+                }
             });
         }
     }

@@ -1,3 +1,4 @@
+// Modified by 7zgfpgfg65-bit, 2026-11-12: verify path/token read contract for worker integration.
 using System;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,17 @@ namespace RvtMcp.Tests.Shared.Documents;
 
 public class GetDocumentStateHandlerTests
 {
+    [Fact]
+    public void Active_state_binds_absolute_path_to_document_token_without_modification()
+    {
+        var result = Run("active-host");
+        Assert.True(result.Value<bool>("success"), result.ToString());
+        var document = Assert.Single((JArray)result["data"]["documents"]);
+        Assert.Equal(Path.Combine(root, "Host.rvt"), document.Value<string>("path"));
+        Assert.Equal("Host", document.Value<string>("document_id")); // deterministic test-boundary token
+        Assert.True(document.Value<bool>("is_active"));
+        Assert.False(document.Value<bool>("is_modified"));
+    }
     private static readonly Lazy<MethodInfo> Probe = new(Compile);
     private readonly string root = Path.Combine(Path.GetTempPath(), "rvt-document-state-" + Guid.NewGuid().ToString("N"));
 
